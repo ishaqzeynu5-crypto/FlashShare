@@ -36,22 +36,34 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Build Debug APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: gradle assembleDebug
+      - name: Prepare Release Keystore
+        env:
+          FLASHSHARE_KEY_ALIAS: ${{ secrets.FLASHSHARE_KEY_ALIAS }}
+          FLASHSHARE_STORE_PASSWORD: ${{ secrets.FLASHSHARE_STORE_PASSWORD }}
+          FLASHSHARE_KEY_PASSWORD: ${{ secrets.FLASHSHARE_KEY_PASSWORD }}
+        run: |
+          KEYSTORE_PATH="$GITHUB_WORKSPACE/flashshare-release.jks"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE_PATH" \
+            -alias "$FLASHSHARE_KEY_ALIAS" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass "$FLASHSHARE_STORE_PASSWORD" \
+            -keypass "$FLASHSHARE_KEY_PASSWORD" \
+            -dname "CN=FlashShare, OU=Mobile, O=FlashShare, L=AddisAbaba, S=AddisAbaba, C=ET"
+          echo "FLASHSHARE_KEYSTORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
-      - name: Build Release APK
+      - name: Build Signed Release APK
         working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          FLASHSHARE_KEY_ALIAS: ${{ secrets.FLASHSHARE_KEY_ALIAS }}
+          FLASHSHARE_STORE_PASSWORD: ${{ secrets.FLASHSHARE_STORE_PASSWORD }}
+          FLASHSHARE_KEY_PASSWORD: ${{ secrets.FLASHSHARE_KEY_PASSWORD }}
         run: gradle assembleRelease
 
-      - name: Upload Debug APK
+      - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: FlashShare-debug-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: FlashShare-release-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/*.apk
+          name: FlashShare-signed-release-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/release/app-release.apk
