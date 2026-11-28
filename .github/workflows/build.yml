@@ -42,7 +42,8 @@ jobs:
       - name: Build, Lint & Test (full + play)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          gradle assembleFullDebug assemblePlayDebug lintFullDebug lintPlayDebug testFullDebugUnitTest testPlayDebugUnitTest
+          gradle assembleFullDebug lintFullDebug testFullDebugUnitTest
+          gradle assemblePlayDebug lintPlayDebug testPlayDebugUnitTest
 
       - name: Verify 16 KB page-size alignment of Debug APKs
         working-directory: ${{ env.PROJECT_DIR }}
@@ -123,7 +124,8 @@ jobs:
           KEYSTORE_PATH="$RUNNER_TEMP/flashshare-release.jks"
           echo "$FLASHSHARE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
           export FLASHSHARE_KEYSTORE_FILE="$KEYSTORE_PATH"
-          gradle assembleFullRelease assemblePlayRelease
+          gradle assembleFullRelease
+          gradle assemblePlayRelease
           rm -f "$KEYSTORE_PATH"
 
       - name: Verify 16 KB page-size alignment of Release APKs
@@ -146,3 +148,4 @@ jobs:
           path: |
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/full/release/*.apk
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/play/release/*.apk
+ኧ
