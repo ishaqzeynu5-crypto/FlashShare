@@ -1,47 +1,150 @@
-name: Generate Release Keystore (Run Once)
+name: Build & Verify FlashShare
 
 on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  generate:
+  debug-and-test:
     runs-on: ubuntu-latest
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Unzip project and locate Gradle root
+        run: |
+          for z in *.zip; do
+            if [ -f "$z" ]; then
+              unzip -o "$z"
+            fi
+          done
+          PROJECT_DIR=$(dirname "$(find . -name 'settings.gradle.kts' | head -n 1)")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Generate persistent JKS keystore using existing GitHub Secrets
+      - name: Setup Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build, Lint & Test (full + play)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          gradle assembleFullDebug lintFullDebug testFullDebugUnitTest
+          gradle assemblePlayDebug lintPlayDebug testPlayDebugUnitTest
+
+      - name: Verify 16 KB page-size alignment of Debug APKs
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          ZIPALIGN=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name zipalign | sort -V | tail -n 1)
+          for APK in app/build/outputs/apk/full/debug/*.apk app/build/outputs/apk/play/debug/*.apk; do
+            if [ -n "$ZIPALIGN" ] && [ -f "$APK" ]; then
+              echo "Checking 16 KB alignment: $APK"
+              "$ZIPALIGN" -c -P 16 -v 4 "$APK" | tail -n 10
+            fi
+          done
+
+      - name: Upload Debug APKs (full & play)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: FlashShare-debug-apks
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/full/debug/*.apk
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/play/debug/*.apk
+
+  release:
+    needs: debug-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check signing secrets
+        id: check_secrets
         env:
+          KEYSTORE_B64: ${{ secrets.FLASHSHARE_KEYSTORE_BASE64 }}
           KEY_ALIAS: ${{ secrets.FLASHSHARE_KEY_ALIAS }}
           STORE_PWD: ${{ secrets.FLASHSHARE_STORE_PASSWORD }}
           KEY_PWD: ${{ secrets.FLASHSHARE_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEY_ALIAS" ] || [ -z "$STORE_PWD" ] || [ -z "$KEY_PWD" ]; then
-            echo "::error::Missing FLASHSHARE_KEY_ALIAS, FLASHSHARE_STORE_PASSWORD, or FLASHSHARE_KEY_PASSWORD secret."
-            exit 1
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEY_ALIAS" ] && [ -n "$STORE_PWD" ] && [ -n "$KEY_PWD" ]; then
+            echo "can_sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping release build — add FLASHSHARE_KEYSTORE_BASE64, FLASHSHARE_KEY_ALIAS, FLASHSHARE_STORE_PASSWORD, and FLASHSHARE_KEY_PASSWORD secrets."
+            echo "can_sign=false" >> "$GITHUB_OUTPUT"
           fi
-          mkdir -p keystore_out
-          keytool -genkeypair -v \
-            -keystore keystore_out/flashshare-release.jks \
-            -storetype JKS \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -alias "$KEY_ALIAS" \
-            -storepass "$STORE_PWD" \
-            -keypass "$KEY_PWD" \
-            -dname "CN=FlashShare, OU=Mobile, O=FlashShare, L=Addis Ababa, C=ET"
-          base64 -w 0 keystore_out/flashshare-release.jks > keystore_out/FLASHSHARE_KEYSTORE_BASE64.txt
 
-      - name: Upload keystore package (1-day retention)
+      - name: Unzip project and locate Gradle root
+        if: steps.check_secrets.outputs.can_sign == 'true'
+        run: |
+          for z in *.zip; do
+            if [ -f "$z" ]; then
+              unzip -o "$z"
+            fi
+          done
+          PROJECT_DIR=$(dirname "$(find . -name 'settings.gradle.kts' | head -n 1)")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Set up JDK 17
+        if: steps.check_secrets.outputs.can_sign == 'true'
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle 8.11.1
+        if: steps.check_secrets.outputs.can_sign == 'true'
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Decode Keystore & Build Signed Release APKs (full & play)
+        if: steps.check_secrets.outputs.can_sign == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          FLASHSHARE_KEYSTORE_BASE64: ${{ secrets.FLASHSHARE_KEYSTORE_BASE64 }}
+          FLASHSHARE_KEY_ALIAS: ${{ secrets.FLASHSHARE_KEY_ALIAS }}
+          FLASHSHARE_STORE_PASSWORD: ${{ secrets.FLASHSHARE_STORE_PASSWORD }}
+          FLASHSHARE_KEY_PASSWORD: ${{ secrets.FLASHSHARE_KEY_PASSWORD }}
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/flashshare-release.jks"
+          echo "$FLASHSHARE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          export FLASHSHARE_KEYSTORE_FILE="$KEYSTORE_PATH"
+          gradle assembleFullRelease
+          gradle assemblePlayRelease
+          rm -f "$KEYSTORE_PATH"
+
+      - name: Verify 16 KB page-size alignment of Release APKs
+        if: steps.check_secrets.outputs.can_sign == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          ZIPALIGN=$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -name zipalign | sort -V | tail -n 1)
+          for APK in app/build/outputs/apk/full/release/*.apk app/build/outputs/apk/play/release/*.apk; do
+            if [ -f "$APK" ]; then
+              echo "Checking 16 KB alignment: $APK"
+              "$ZIPALIGN" -c -P 16 -v 4 "$APK" | tail -n 10
+            fi
+          done
+
+      - name: Upload Signed Release APKs (full & play)
+        if: steps.check_secrets.outputs.can_sign == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: flashshare-keystore-backup
-          retention-days: 1
-          path: keystore_out/
+          name: FlashShare-signed-release-apks
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/full/release/*.apk
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/play/release/*.apk
