@@ -148,4 +148,3 @@ jobs:
           path: |
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/full/release/*.apk
             ${{ env.PROJECT_DIR }}/app/build/outputs/apk/play/release/*.apk
-ኧ
