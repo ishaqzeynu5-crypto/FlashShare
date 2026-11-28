@@ -39,14 +39,10 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Ensure Gradle Wrapper and Build, Lint & Test (full + play)
+      - name: Build, Lint & Test (full + play)
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          if [ ! -f "./gradlew" ] || [ ! -f "./gradle/wrapper/gradle-wrapper.jar" ]; then
-            gradle wrapper --gradle-version 8.11.1 --distribution-type bin
-          fi
-          chmod +x ./gradlew
-          ./gradlew assembleFullDebug assemblePlayDebug lintFullDebug lintPlayDebug testFullDebugUnitTest testPlayDebugUnitTest
+          gradle assembleFullDebug assemblePlayDebug lintFullDebug lintPlayDebug testFullDebugUnitTest testPlayDebugUnitTest
 
       - name: Verify 16 KB page-size alignment of Debug APKs
         working-directory: ${{ env.PROJECT_DIR }}
@@ -60,6 +56,7 @@ jobs:
           done
 
       - name: Upload Debug APKs (full & play)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: FlashShare-debug-apks
@@ -123,14 +120,10 @@ jobs:
           FLASHSHARE_STORE_PASSWORD: ${{ secrets.FLASHSHARE_STORE_PASSWORD }}
           FLASHSHARE_KEY_PASSWORD: ${{ secrets.FLASHSHARE_KEY_PASSWORD }}
         run: |
-          if [ ! -f "./gradlew" ] || [ ! -f "./gradle/wrapper/gradle-wrapper.jar" ]; then
-            gradle wrapper --gradle-version 8.11.1 --distribution-type bin
-          fi
-          chmod +x ./gradlew
           KEYSTORE_PATH="$RUNNER_TEMP/flashshare-release.jks"
           echo "$FLASHSHARE_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
           export FLASHSHARE_KEYSTORE_FILE="$KEYSTORE_PATH"
-          ./gradlew assembleFullRelease assemblePlayRelease
+          gradle assembleFullRelease assemblePlayRelease
           rm -f "$KEYSTORE_PATH"
 
       - name: Verify 16 KB page-size alignment of Release APKs
